@@ -1,2 +1,2 @@
 # RTBox-Python
-Python drivers for RTBox
+PsychoPy drivers for RTBox

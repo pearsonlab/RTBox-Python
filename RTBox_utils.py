@@ -3,37 +3,41 @@ import glob
 import serial
 import time
 
-def find_ports(allPorts):
+
+def find_ports(port=None):
     '''
     Finds names of all ports with RTBoxes connected and returns the port name
     along with the version number
 
     Params:
-    allPorts (bool) - If set to True, this function will close any opened RTBox
-                      and return all RTBox ports.
+    port (str) - If this is set, the function verifies that the port is an
+                 RTBox and it returns the port name with the RTBox version
+                 number. If not set, the function will close all RTBoxes
+                 and return a list of the ones available.
 
     Returns:
     valid_ports (list of 2 element tuples) - List of (port_name, version) for
                                              each valid RTBox port.
     '''
-    if allPorts:
-        ### CLOSE ALL RTBoxes
-        pass
-    system = platform.system()
-    if system == 'Windows':
-        ports = ['\\\\.\\COM%i'%i for i in range(1,257)]
-    elif system == 'Darwin':
-        ports = glob.glob('/dev/cu.usbserialRTBox*')
-        if not ports:
-            ports = glob.glob('/dev/cu.usbserial*')
-    elif system == 'Linux':
-        ports = glob.glob('/dev/ttyUSB*')
-    else:
-        raise('System not supported')
     valid_ports = []
-    for port in ports:
+    if port is None:
+        ### CLOSE ALL RTBoxes
+        system = platform.system()
+        if system == 'Windows':
+            ports = ['\\\\.\\COM%i'%i for i in range(1, 257)]
+        elif system == 'Darwin':
+            ports = glob.glob('/dev/cu.usbserialRTBox*')
+            if not ports:
+                ports = glob.glob('/dev/cu.usbserial*')
+        elif system == 'Linux':
+            ports = glob.glob('/dev/ttyUSB*')
+        else:
+            raise('System not supported')
+    else:
+        ports = [port]
+    for p in ports:
         try:
-            ser = serial.Serial(port=port, baudrate=115200, timeout=0.3)
+            ser = serial.Serial(port=p, baudrate=115200, timeout=0.3)
         except OSError:  # could not connect as serial device
             continue
         ser.write(bytes('X'))
@@ -51,6 +55,6 @@ def find_ports(allPorts):
                 ver = float(idn[18:])
                 if ver > 10:
                     ver = ver/100
-            valid_ports.append((port, ver))
+            valid_ports.append((p, ver))
 
     return valid_ports
