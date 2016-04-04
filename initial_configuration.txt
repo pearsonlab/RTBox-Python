@@ -1,0 +1,33 @@
+In order for the RTBox to work with your computer, you need to have an FTDI driver installed for OS X 10.9+ and the FTDI USB Serial driver installed
+
+
+How to get FTDI driver installed for OS X:
+
+1. Unplug all FTDI devices
+
+2. If you have OS X 10.11+, you need to disable the System Integrity Protection in OS X.
+	- Boot into Recovery OS by restarting your machine and holding down the Command and R keys at startup.
+	- Go into utilities > terminal
+	- Enter the following commands:
+		csrutil disable
+		reboot
+
+3. From OS X 10.9 and onwards, Apple has installed its own FTDI driver, and it needs to be disabled.  Now that System Integrity Protection is disabled, enter in the following commands:
+	cd ~/../../System/Library/Extensions
+	sudo mv AppleUSBFTDI.kext AppleUSBFTDI.disabled
+This will disable Apple’s custom FTDI driver
+
+4. If on OS X 10.11+, reenable System Integrity Protection for security.  Boot into Recovery OS, open terminal, and enter the following commands:
+	csrutil enable
+	reboot
+
+5. Download and install the FTDI VCP driver from the link below:
+http://www.ftdichip.com/Drivers/VCP.htm
+The driver should now be located in /Library/Extensions/FTDIUSBSerialDriver.kext
+
+
+How to get USB Serial driver installed for OS X:
+
+1. Download the driver from http://www.ftdichip.com/Drivers/VCP.htm, open the dmg and install
+
+2. Restart your computer
