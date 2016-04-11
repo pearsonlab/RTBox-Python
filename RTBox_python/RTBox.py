@@ -9,12 +9,6 @@ import time
 import warnings
 import numpy as np
 
-"""
-todo:
-handle fake mode?
-"""
-
-
 class RTBox(object):
     """
     This class serves as a handler for all RTBox operations. If initialized
@@ -199,7 +193,7 @@ class RTBox(object):
         for event_type in self.enabled_event_types:
             if self.enabled_event_types[event_type]:
                 bit_index = RTBox.EVENT_TYPE_BIT_ORDER[event_type]
-                byteInt += 2.^bit_index
+                byteInt += pow(2,bit_index)
         return byteInt
 
 
