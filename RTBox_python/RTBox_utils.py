@@ -64,13 +64,15 @@ def find_ports(port=None):
 def get_latency():
         system = platform.system()
         if system == 'Darwin':
-            _get_latency_mac()
+            latency = _get_latency_mac()
         elif system == 'Windows':
             raise NotImplementedError('Windows not supported yet')
         elif system == 'Linux':
             raise NotImplementedError('Linux not supported yet')
         else:
             raise('System not recognized')
+
+        return latency
 
 # returns latency in ms as a float and error message
 def _get_latency_mac():
@@ -99,4 +101,4 @@ def _get_latency_mac():
     i0 = ind + 9 # skip <integer>
     i1 = ind + contents[ind:].find('</integer>')
     latency = float(contents[i0:i1])
-    return (latency, None)
+    return latency

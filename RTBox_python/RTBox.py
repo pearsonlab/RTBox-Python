@@ -22,6 +22,38 @@ class RTBox(object):
     without one, it will connect to the first RTBox it finds from the
     find_ports method.
     """
+
+    EVENT_TYPE_BIT_ORDER = {
+        'press': 0,
+        'release': 1,
+        'sound': 2,
+        'light': 4,
+        'tr': 5,
+        'aux': 6
+    }
+
+    BUTTON_DOWN_EVENTS = ['1_down', '2_down', '3_down', '4_down']
+    BUTTON_UP_EVENTS = ['1_up', '2_up', '3_up', '4_up']
+    BUTTON_EVENTS = BUTTON_DOWN_EVENTS + BUTTON_UP_EVENTS
+    OTHER_EVENTS_WO_SERIAL = ['sound', 'light', 'tr', 'aux']
+    EVENTS = BUTTON_EVENTS + OTHER_EVENTS_WO_SERIAL + ['serial']
+
+    EVENT_CODES = {
+        49: '1_down',
+        51: '2_down',
+        53: '3_down',
+        55: '4_down',
+        50: '1_up',
+        52: '2_up',
+        54: '3_up',
+        56: '4_up',
+        97: 'sound',
+        48: 'light',
+        57: 'tr',
+        98: 'aux',
+        89: 'serial'
+    }
+
     def __init__(self, port=None, test=False):
         super(RTBox, self).__init__()
         if (test):
@@ -33,85 +65,162 @@ class RTBox(object):
             self.port, self.ver = ports[0]
         self.ser = serial.Serial(port=self.port, baudrate=115200,
                                  timeout=1.0)
-        self.info = {}
-        self.info['events'] = ['1', '2', '3', '4']
-        self.info['clockRatio'] = 1.0
-        self.info['clockRatioLoaded'] = False
-        self.info['clockUnit'] = 1.0/115200
-        self.info['enabled'] = np.array([True, False, False, False, False, False])
-        self.info['tpreOffset'] = [9.2306e-5, 9.2306e-5]
-        self.info['latencyTimer'] = get_latency();
+        self.clockRatio = 1.0
+        self.clockRatioLoaded = False
+        self.clockUnit = 1.0/115200
+        self.enabled_event_types = {
+            'press': True,
+            'release': False,
+            'sound': False,
+            'light': False,
+            'tr': False,
+            'aux': False
+        }
+        self.tpreOffset = [9.2306e-5, 9.2306e-5]
+        self.latency_timer = get_latency()
+        self.num_events_to_read = 1
 
         if self.ver >= 5.0:
-            self.info['tpreOffset'][1] += 10.0/115200
+            self.tpreOffset[1] += 10.0/115200
 
         if self.ver > 4.3:
             b = self._readEEPROM(224, 6)
-            self.info['TTLWidth'] = (255 - b[0]) / 7200.0
-            self.info['TTLresting'] = get_bits(b[1], range(0, 2))
-            self.info['threshold'] = np.array(get_bits(b[1], [3, 6])).dot([1, 2]) + 1
-            self.info['debounceInterval'] = tuple((256**i * b[i + 2]) / 921600. for i in range(0, 4))
+            self.TTLWidth = (255 - b[0]) / 7200.0
+            self.TTLresting = get_bits(b[1], range(0, 2))
+            self.threshold = np.array(get_bits(b[1], [3, 6])).dot([1, 2]) + 1
+            self.debounceInterval = tuple((256**i * b[i + 2]) / 921600. for i in range(0, 4))
         else:
             raise NotImplementedError('Older RTBox not supported currently')
 
         mac = "%0.2X" % get_mac()
-        self.info['MAC'] = [int(mac[i:i+2], 16) for i in range(0, len(mac), 2)]
+        self.MAC = [int(mac[i:i+2], 16) for i in range(0, len(mac), 2)]
 
+        # default eeprom address index is 0
         eeprom_addr_ind = 0
         eeprom_addr_found = False
         # Try to find eeprom address with corresponding MAC address
         for i in range(16):
             b14 = self._readEEPROM(i*14, 14)
-            if np.equal(b14[8:14], self.info['MAC']).all():
+            if np.equal(b14[8:14], self.MAC).all():
+                # set eeprom address index
+                eeprom_addr_ind = i
                 eeprom_addr_found = True
-                self.info['clockRatioLoaded'] = True
+                # set clock ratio
+                self.clockRatio = np.array(b14[:8], dtype=np.uint8).view(np.float64)[0]
+                self.clockRatioLoaded = True
                 break
         # If fail, try to find an empty slot
         if not eeprom_addr_found:
+            print 'MAC not found'
             for i in range(16):
                 b14 = self._readEEPROM(i*14, 14)
                 if np.equal(b14[:6], 255).all():  # EEPROM not written
                     eeprom_addr_ind = i
                     break
-        self.info['eeprom_addr'] = eeprom_addr_ind*14
 
-        if not np.equal(np.diff(b14[:6]), 0).all():
-            ratio = np.array(b14[:8], dtype=np.uint8).view(np.float64)[0]
-            if np.abs(ratio - 1) < 0.01:
-                self.info['clockRatio'] = ratio
-        if not self.info['clockRatioLoaded']:
+        self.eeprom_addr = eeprom_addr_ind*14
+
+        if not self.clockRatioLoaded:
             warnings.warn('Clock ratio not corrected. Run RTBox.set_clock() before timing responses.')
 
+    # Closes the connection to the RTBox. Call this before terminating your program.
     def close(self):
-        """
-        Closes the connection to the RTBox. Call this before terminating your
-        program.
-        """
         self.ser.close
 
-    def set_clock(self, trials_per_iteration=20, iterations=3, interval=1):
-        """
-        Measures and sets clock ratio. This only needs to be run once per
-        machine per RTBox.
-        The default parameters in general should be used and not modified.
-        """
+    def get_clock_ratio(self):
+        return self.clockRatio
 
+    def get_t_diff(self):
+        return self.t_diff
+
+    def prep(self, samples=20):
+        [t_diff, t_receive] = self._syncClocks(samples)
+        self.t_diff = t_diff
+        # self.t_receive = t_receive ??
+        # if self.enabled_events['light'] or self.enabled_events['tr'] or self.enabled_events['aux']: ??
+        #     self._update_enabled_events() ??
+        self._purge()
+
+    def read(self, secs=0.1):
+        # Wait for time
+        curr_time = core.getTime()
+        timeout = curr_time + secs
+
+        is_reading = False
+        num_bytes_prev = self.ser.inWaiting()
+        curr_time = core.getTime()
+        print 'Current time: ' + str(curr_time)
+        while curr_time < timeout or is_reading:
+            time.sleep(self.latency_timer/1000)
+            curr_time = core.getTime()
+            num_bytes_curr = self.ser.inWaiting()
+            # Wait if reading
+            if num_bytes_curr > num_bytes_prev:
+                is_reading = True
+            else:
+                is_reading = False
+            num_bytes_prev = num_bytes_curr
+        num_events = num_bytes_curr / 7
+        # Each event contains 7 bytes
+        events_bytes = self.ser.read(num_events * 7)
+        events = []
+        event_times = []
+        for i in range(0, num_events):
+            events.append(RTBox.EVENT_CODES[unpack_bytes(events_bytes[i*7])[0]])
+            event_times.append(self._bytes2secs(unpack_bytes(events_bytes[i*7 + 1: (i+1)*7])) + self.t_diff)
+        return [events, event_times]
+
+    # Enables events specified in string list events_to_enable
+    # Valid events are:
+    #    press, release, sound, pulse, light, tr, aux
+    def _enable_disable_events(self, event_types, enable_disable):
+        # Check for valid input
+        for event_type in event_types:
+            if type(event_type) is not 'str':
+                raise Exception('Events need to be in string format')
+            if event_type.lower() == 'all':
+                events = list(self.enabled_event_types.keys())
+            if event_type.lower() not in self.enabled_event_types.keys():
+                raise Exception('Events needs to be one of the following:\n'
+                                'press, release, sound, pulse, light, tr, aux\n'
+                                'In addition, input \'all\' will enable all of the events above')
+
+        for event_type in event_types:
+            self.enabled_event_types[event_type] = enable_disable
+
+        self._update_enabled_event_types()
+
+    def _update_enabled_event_types(self):
+        byte_int_to_send = self._get_event_type_byte_string()
+        self._enable_byte(byte_int_to_send)
+
+    def _get_event_type_byte_string(self):
+        byteInt = 0
+        for event_type in self.enabled_event_types:
+            if self.enabled_event_types[event_type]:
+                bit_index = RTBox.EVENT_TYPE_BIT_ORDER[event_type]
+                byteInt += 2.^bit_index
+        return byteInt
+
+
+    # Measures and sets clock ratio. This only needs to be run once per
+    #    machine per RTBox.
+    # The default parameters in general should be used and not modified.
+    def set_clock(self, samples_per_trial=10, trials_per_iteration=20, iterations=3, interval=1):
         if trials_per_iteration < 1 or iterations < 1:
             raise Exception('trials_per_iteration and iterations need to be positive integers')
-        if trials_per_iteration < 10 or iterations < 3:
-            warnings.warn('Recommend trials_per_iteration >= 10 and iterations >= 3')
+        if samples_per_trial < 10 or trials_per_iteration < 10 or iterations < 3:
+            warnings.warn('Recommend samples_per_trial >= 10, trials_per_iteration >= 10, and iterations >= 3')
         if interval < 1:
             warnings.warn('Recommend interval time = 1s')
 
         print 'Measuring clock ratio. Progress:\n'
 
-        self._enable_byte(0)  # disable all
-
         for iteration in range(0, iterations):
             results = np.zeros((trials_per_iteration, 2))
             # conduct trials
             for i in range(trials_per_iteration):
-                sync_stats = self._syncClocks(10)
+                sync_stats = self._syncClocks(samples_per_trial)
                 results[i, :] = sync_stats[:2]
                 print '%d / %d trials' % (i + trials_per_iteration*iteration, trials_per_iteration*iterations)
                 core.wait(interval)
@@ -120,19 +229,19 @@ class RTBox(object):
             t_diff = results[:,0]
             [slope, intercept, r_value, p_value, std_error] = \
                 stats.linregress(t_receive, t_diff)
-            self.info['clockRatio'] = self.info['clockRatio'] * (1 + slope)
+            self.clockRatio = self.clockRatio * (1 + slope)
             if (i+1 == trials_per_iteration):
                 slope_final = slope
                 std_error_final = std_error
 
         print '\n'
-        print 'Clock ratio (computer/box): %.8f += %.8f\n' % (self.info['clockRatio'], std_error_final)
+        print 'Clock ratio (computer/box): %.8f += %.8f\n' % (self.clockRatio, std_error_final)
 
         if std_error_final > 1e-4:
             ratioBigSE_warning = 'The slope std error is large (%2g).  Try longer time for clock ratio' % std_error_final
             warnings.warn(ratioBigSE_warning)
         if abs(slope_final) > 0.01:
-            self.info['clockRatio'] = 1.0;
+            self.clockRatio = 1.0;
             ratioErr = 'The clock ratio differenece is very high (%2g).  ' % slope_final
             ratioErr = ratioErr + 'Your computer timing probably has a problem?'
             raise Exception(ratioErr)
@@ -141,22 +250,50 @@ class RTBox(object):
             raise NotImplementedError('Older RTBox not supported currently')
         else:
             # Store ratio in EEPROM
-            ratio_nparray = np.array([self.info['clkRatio']], dtype=np.float64)
+            print 'Storing clock ratio (' + str(self.clockRatio) + ')'
+            ratio_nparray = np.array([self.clockRatio], dtype=np.float64)
             ratio_bytes = ratio_nparray.view(np.uint8)
-            mac_info_array = np.array(self.info['MAC'], dtype=np.uint8)
+            mac_info_array = np.array(self.MAC, dtype=np.uint8)
             eeprom_data = np.concatenate([ratio_bytes, mac_info_array])
-            self._writeEEPROM(self.info['eeprom_addr'], eeprom_data)
+            self._writeEEPROM(self.eeprom_addr, eeprom_data)
 
-    def get_button_names(self):
-        return self.info['events']
+    def enable_event_types(self, event_types):
+        self._enable_disable_events(event_types, True)
 
-    def set_button_names(self, names):
-        if len(names) is not 4:
-            raise Exception('Array needs to be length 4; need to set names for 4 buttons')
-        for name in names:
-            if type(name) is not str:
-                raise Exception('Names need to be strings')
-        self.info['events'] = names
+    def disable_event_types(self, event_types):
+        self._enable_disable_events(event_types, False)
+
+    # Enables events specified in string list events_to_enable
+    # Valid events are:
+    #    press, release, sound, pulse, light, tr, aux
+    def _enable_disable_events(self, event_types, enable_disable):
+        # Check for valid input
+        for event_type in event_types:
+            if type(event_type) is not 'str':
+                raise Exception('Events need to be in string format')
+            if event_type.lower() == 'all':
+                events = list(self.enabled_event_types.keys())
+            if event_type.lower() not in self.enabled_event_types.keys():
+                raise Exception('Events needs to be one of the following:\n'
+                                'press, release, sound, pulse, light, tr, aux\n'
+                                'In addition, input \'all\' will enable all of the events above')
+
+        for event_type in event_types:
+            self.enabled_event_types[event_type] = enable_disable
+
+        self._update_enabled_event_types()
+
+    def _update_enabled_event_types(self):
+        byte_int_to_send = self._get_event_type_byte_string()
+        self._enable_byte(byte_int_to_send)
+
+    def _get_event_type_byte_string(self):
+        byteInt = 0
+        for event_type in self.enabled_event_types:
+            if self.enabled_event_types[event_type]:
+                bit_index = RTBox.EVENT_TYPE_BIT_ORDER[event_type]
+                byteInt += pow(2,bit_index)
+        return byteInt
 
     def _enable_byte(self, enByte):
         if self.ver < 4.1:
@@ -171,10 +308,12 @@ class RTBox(object):
                     raise Exception('RTBox not responding')
 
     def _syncClocks(self, num_samples, enableInd=None):
-        if np.any(self.info['enabled']):
-            self._enable_byte(0)
+        # disable all inputs
+        self._enable_byte(0)
+        # clear serial buffers
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
+
         t_pre = np.zeros(num_samples)
         t_post = np.zeros(num_samples)
         t_receive = np.zeros(num_samples)
@@ -218,16 +357,16 @@ class RTBox(object):
 
         if twin > 0.003 and tdiff_ub > 0.001:
             warnings.warn("USB Overload")
-        if enableInd is not None:
-            foo = (2**np.arange(6)[enableInd]).dot(
-                   self.info['enabled'][enableInd])
-            self._enable_byte(foo)  # restore enable
+
+        # reenable inputs
+        self._update_enabled_event_types()
+
         return [t_diff_method1, t_receive_method1]
 
     def _bytes2secs(self, b6, ratio=None):
         if ratio is None:
-            ratio = self.info['clkRatio']
-        return (256**np.arange(5, -1, -1)).dot(b6) * self.info['clockUnit'] * ratio
+            ratio = self.clockRatio
+        return (256**np.arange(5, -1, -1)).dot(b6) * self.clockUnit * ratio
 
     def _purge(self):
         byte = self.ser.inWaiting()
@@ -258,27 +397,20 @@ class RTBox(object):
         data_string = pack_bytes(bytes)
         self.ser.write(data_string)
 
-
+# From: http://stackoverflow.com/questions/2591483/getting-a-specific-bit-value-in-a-byte-string
 def get_bits(byteval, locs):
-    """
-    From: http://stackoverflow.com/questions/2591483/getting-a-specific-bit-value-in-a-byte-string
-    """
     return tuple(((byteval & (1 << i)) != 0) for i in locs)
 
+# Takes a tuple of ints and packs into byte string
 def pack_bytes(byte_array):
-    """
-    Takes a tuple of ints and packs into byte string
-    """
     num_ints = len(byte_array)
     byte_string = ""
     for i in range(0, num_ints):
         byte_string += struct.pack('!B', byte_array[i])
     return byte_string
 
+# Takes a byte string and unpacks into tuple of ints
 def unpack_bytes(byte_string):
-    """
-    Takes a byte string and unpacks into tuple of ints
-    """
     return tuple(struct.unpack('!B', i)[0] for i in byte_string)
 
 
