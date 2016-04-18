@@ -1,0 +1,18 @@
+In order for the RTBox to work with your computer, you need to have the FTDI USB Serial driver installed for Windows XP.
+
+1. Download the FTDI VCP driver from the link below:
+http://www.ftdichip.com/Drivers/VCP.htm
+
+2. Follow the reference in the pdf in the “FTDI Installation guides” directory
+
+Next, you need to change the latency timer the driver specifies
+
+1. Click Start->Run
+
+2. Enter “regedit”, click ok
+
+3. Navigate to HKEY_LOCAL_MACHINE->CurrentControlSet->Enum->FTDIBUS->VID…->0000->DeviceParameters
+
+4. Double click on the “LatencyTimer” parameter
+
+5. Change the value to 1 (same in hex or decimal)
