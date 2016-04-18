@@ -2,8 +2,6 @@ import platform
 import glob
 import serial
 import time
-import os
-
 
 def find_ports(port=None):
     '''
@@ -39,7 +37,7 @@ def find_ports(port=None):
     for p in ports:
         try:
             ser = serial.Serial(port=p, baudrate=115200, timeout=0.3)
-        except OSError:  # could not connect as serial device
+        except:  # could not connect as serial device
             continue
         ser.write(bytes('X'))
         idn = ser.read(21)
@@ -59,46 +57,3 @@ def find_ports(port=None):
             valid_ports.append((p, ver))
 
     return valid_ports
-
-
-def get_latency():
-        system = platform.system()
-        if system == 'Darwin':
-            latency = _get_latency_mac()
-        elif system == 'Windows':
-            raise NotImplementedError('Windows not supported yet')
-        elif system == 'Linux':
-            raise NotImplementedError('Linux not supported yet')
-        else:
-            raise('System not recognized')
-
-        return latency
-
-# returns latency in ms as a float and error message
-def _get_latency_mac():
-    # find FTDI driver
-    vendor = 'FTDIUSBSerialDriver.kext/'
-    mac_ver = int(platform.mac_ver()[0].split('.')[1])
-    if mac_ver >= 9:
-        folder = '/Library/Extensions/'
-    else:
-        folder = '/System/Library/Extensions/'
-    fname = os.path.join(folder, vendor, 'Contents/Info.plist')
-    # find FTDI2XXB inside FTDI driver file
-    try:
-        f = open(fname)
-        contents = f.read()
-        f.close()
-    except (OSError, IOError):
-        return (None, 'Failed to find FTDI driver; check correct installation')
-    ind = contents.find('<key>FTDI2XXB')
-    if ind < 0:
-        return (None, 'Failed to detect product key')
-    # find first LatencyTimer key after FTDI2XXB key
-    ind += contents[ind:].find('<key>LatencyTimer</key>')
-    ind += contents[ind:].find('<integer>')
-    # note indices for latency timer value
-    i0 = ind + 9 # skip <integer>
-    i1 = ind + contents[ind:].find('</integer>')
-    latency = float(contents[i0:i1])
-    return latency

@@ -1,5 +1,4 @@
 from RTBox_utils import find_ports
-from RTBox_utils import get_latency
 from uuid import getnode as get_mac
 from psychopy import core
 from scipy import stats
@@ -71,7 +70,7 @@ class RTBox(object):
             'aux': False
         }
         self.tpreOffset = [9.2306e-5, 9.2306e-5]
-        self.latency_timer = get_latency()
+        self.latency_timer = 1
         self.num_events_to_read = 1
 
         if self.ver >= 5.0:
@@ -305,8 +304,7 @@ class RTBox(object):
         # disable all inputs
         self._enable_byte(0)
         # clear serial buffers
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
+        self._purgeBuffers()
 
         t_pre = np.zeros(num_samples)
         t_post = np.zeros(num_samples)
@@ -375,8 +373,7 @@ class RTBox(object):
                 raise Exception('RTBox not responding')
             byte = byte1
         # purge buffers
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
+        self._purgeBuffers()
 
     def _readEEPROM(self, addr, n_bytes):
         self.ser.write(pack_bytes([17]))
@@ -390,6 +387,14 @@ class RTBox(object):
         self.ser.write(pack_bytes([addr, n_bytes]))
         data_string = pack_bytes(bytes)
         self.ser.write(data_string)
+
+    def _purgeBuffers(self):
+        if (self.ser.VERSION >= 3):
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+        else:
+            self.ser.flushInput()
+            self.ser.flushOutput()
 
 # From: http://stackoverflow.com/questions/2591483/getting-a-specific-bit-value-in-a-byte-string
 def get_bits(byteval, locs):
