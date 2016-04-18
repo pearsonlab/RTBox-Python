@@ -47,10 +47,17 @@ class RTBox(object):
         89: 'serial'
     }
 
-    def __init__(self, port=None, test=False):
+    def __init__(self, port=None):
+        """
+        Construct a new RTBox object.  Will call warning to run set_clock if RTBox does not have clock ratio between
+        itself and the computer set in memory.
+
+        :param port: If initialized, will attempt to connect to specified port
+        :return: Nothing
+        """
+
         super(RTBox, self).__init__()
-        if (test):
-            return
+
         ports = find_ports(port)
         if not ports:
             raise Exception('Unable to connect to RTBox')
@@ -116,17 +123,41 @@ class RTBox(object):
         if not self.clockRatioLoaded:
             warnings.warn('Clock ratio not corrected. Run RTBox.set_clock() before timing responses.')
 
-    # Closes the connection to the RTBox. Call this before terminating your program.
     def close(self):
+        """
+        Closes the connection to the RTBox. Call this before terminating your program.
+
+        :return: nothing
+        """
         self.ser.close
 
     def get_clock_ratio(self):
+        """
+        Returns current clock ratio variable
+
+        :return: current clock ratio
+        """
+
         return self.clockRatio
 
     def get_t_diff(self):
+        """
+        Returns current t_diff variable (in computer time (secs))
+
+        :return: current t_diff
+        """
+
         return self.t_diff
 
     def prep(self, samples=20):
+        """
+        Sets t_diff to current difference between computer time and the RTBox time.  Run every time RTBox is plugged in
+        to the USB port.  Make sure that set_clock has been run at least once between the computer and the RTBox, and
+        the RTBox memory has the clock ratio.
+
+        :return: nothing
+        """
+
         [t_diff, t_receive] = self._syncClocks(samples)
         self.t_diff = t_diff
         # self.t_receive = t_receive ??
@@ -135,6 +166,16 @@ class RTBox(object):
         self._purge()
 
     def read(self, secs=0.1):
+        """
+        Read all enabled input responses from the time read is called for time specified in secs.
+
+        :param secs: length of time to read in seconds
+
+        :return: Returns a list [events, event_times].  events contains a list of the string label of events detected.
+        event_times returns a list of times the events were recorded relative to the psychopy core module.  Element in
+        index i for events and event_times refer to the same event.
+        """
+
         # Wait for time
         curr_time = core.getTime()
         timeout = curr_time + secs
@@ -163,43 +204,20 @@ class RTBox(object):
             event_times.append(self._bytes2secs(unpack_bytes(events_bytes[i*7 + 1: (i+1)*7])) + self.t_diff)
         return [events, event_times]
 
-    # Enables events specified in string list events_to_enable
-    # Valid events are:
-    #    press, release, sound, pulse, light, tr, aux
-    def _enable_disable_events(self, event_types, enable_disable):
-        # Check for valid input
-        for event_type in event_types:
-            if type(event_type) is not 'str':
-                raise Exception('Events need to be in string format')
-            if event_type.lower() == 'all':
-                events = list(self.enabled_event_types.keys())
-            if event_type.lower() not in self.enabled_event_types.keys():
-                raise Exception('Events needs to be one of the following:\n'
-                                'press, release, sound, pulse, light, tr, aux\n'
-                                'In addition, input \'all\' will enable all of the events above')
-
-        for event_type in event_types:
-            self.enabled_event_types[event_type] = enable_disable
-
-        self._update_enabled_event_types()
-
-    def _update_enabled_event_types(self):
-        byte_int_to_send = self._get_event_type_byte_string()
-        self._enable_byte(byte_int_to_send)
-
-    def _get_event_type_byte_string(self):
-        byteInt = 0
-        for event_type in self.enabled_event_types:
-            if self.enabled_event_types[event_type]:
-                bit_index = RTBox.EVENT_TYPE_BIT_ORDER[event_type]
-                byteInt += pow(2,bit_index)
-        return byteInt
-
-
-    # Measures and sets clock ratio. This only needs to be run once per
-    #    machine per RTBox.
-    # The default parameters in general should be used and not modified.
     def set_clock(self, samples_per_trial=10, trials_per_iteration=20, iterations=3, interval=1):
+        """
+        Measures and sets clock ratio, stores clock ratio in RTBox memory. This only needs to be run once for each
+        computer and RTBox pair, but make sure to check that RTBox still has clock ratio stored in memory (__init__ will
+        warn to run set_clock if the clock ratio is not in memory.  The default parameters in general should not be
+        modified.
+
+        :param samples_per_trial: number of samples t_receive and t_diff to obtain from _syncClocks for a trial
+        :param trials_per_iteration: number of t_receive and t_diff pairs to obtain for linear regression in an iteration
+        :param iterations: number of times to calculate clock ratio to converge to actual clock ratio
+
+        :return: nothing
+        """
+
         if trials_per_iteration < 1 or iterations < 1:
             raise Exception('trials_per_iteration and iterations need to be positive integers')
         if samples_per_trial < 10 or trials_per_iteration < 10 or iterations < 3:
@@ -251,14 +269,28 @@ class RTBox(object):
             self._writeEEPROM(self.eeprom_addr, eeprom_data)
 
     def enable_event_types(self, event_types):
+        """
+        Enable event types specified in string list events_to_enable.  Valid event types are: press, release,
+        sound, pulse, light, tr, aux
+
+        :param event_types: A list typed in string format of event types to be enabled.
+
+        :return: nothing
+        """
         self._enable_disable_events(event_types, True)
 
     def disable_event_types(self, event_types):
+        """
+        Disable event types specified in string list events_to_enable.  Valid event types are: press, release,
+        sound, pulse, light, tr, aux
+
+        :param event_types: A list typed in string format of event types to be disabled.
+
+        :return: nothing
+        """
+
         self._enable_disable_events(event_types, False)
 
-    # Enables events specified in string list events_to_enable
-    # Valid events are:
-    #    press, release, sound, pulse, light, tr, aux
     def _enable_disable_events(self, event_types, enable_disable):
         # Check for valid input
         for event_type in event_types:

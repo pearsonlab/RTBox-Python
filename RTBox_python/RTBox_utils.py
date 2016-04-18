@@ -4,20 +4,16 @@ import serial
 import time
 
 def find_ports(port=None):
-    '''
+    """
     Finds names of all ports with RTBoxes connected and returns the port name
     along with the version number
 
-    Params:
-    port (str) - If this is set, the function verifies that the port is an
-                 RTBox and it returns the port name with the RTBox version
-                 number. If not set, the function will close all RTBoxes
-                 and return a list of the ones available.
+    :param port: (str) If this is set, the function verifies that the port is an RTBox and it returns the port name with
+    the RTBox version number. If not set, the function will close all RTBoxes and return a list of the ones available.
 
-    Returns:
-    valid_ports (list of 2 element tuples) - List of (port_name, version) for
-                                             each valid RTBox port.
-    '''
+    :return: (2 element tuple) List of (port_name, version) forveach valid RTBox port.
+    """
+
     valid_ports = []
     if port is None:
         ### CLOSE ALL RTBoxes
