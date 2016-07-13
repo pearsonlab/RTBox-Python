@@ -7,6 +7,7 @@ import struct
 import time
 import warnings
 import numpy as np
+import math
 
 class RTBox(object):
     """
@@ -268,6 +269,21 @@ class RTBox(object):
             eeprom_data = np.concatenate([ratio_bytes, mac_info_array])
             self._writeEEPROM(self.eeprom_addr, eeprom_data)
 
+    def get_buffer_size(self):
+        return self.buffer;
+
+    def set_buffer_size(self, num_events):
+        num_bytes = math.ceil(num_events*7/8)*8;
+
+    def get_ttl_threshold(self):
+        return self.threshold;
+
+    def set_ttl_threshold(self, threshold_level):
+        if not isinstance(threshold_level, int) or threshold_level > 4 or threshold_level < 1:
+            raise Exception('threshold must be integer between 1 and 4')
+
+        self._setRestingAndThresholdByte(self.resting_pins1to8, self.resting_pins17to24, threshold_level)
+
     def enable_event_types(self, event_types):
         """
         Enable event types specified in string list events_to_enable.  Valid event types are: press, release,
@@ -290,6 +306,78 @@ class RTBox(object):
         """
 
         self._enable_disable_events(event_types, False)
+
+    def _setRestingAndThresholdByte(self, resting_pins1to8, resting_pins17to24, threshold_level):
+        bit0 = 2 ^ 0 if resting_pins1to8 else 0
+        bit1 = 2 ^ 1 if resting_pins17to24 else 0
+        zero_base_threshold_level = threshold_level - 1
+        bit6 = (zero_base_threshold_level % 2) * 2 ^ 6
+        bit3 = ((zero_base_threshold_level >> 1) % 2) * 2 ^ 3
+
+        byte_to_store = bit0 + bit1 + bit6 + bit3
+
+        resting_threshold_nparray = np.array([byte_to_store], dtype=np.float64)
+        resting_threshold_byte = resting_threshold_nparray.view(np.uint8)
+        self._writeEEPROM(self.eeprom_addr, resting_threshold_byte)
+
+    def set_ttl_resting(self, resting_pins1to8, resting_pins17to24):
+        if self.ver < 4.4:
+            raise NotImplementedError('Older RTBox not supported currently')
+        if not isinstance(resting_pins1to8, bool) or not isinstance(resting_pins17to24, bool):
+            raise Exception('resting arguments must be boolean')
+
+        self.resting_pins1to8 = resting_pins1to8
+        self.resting_pins17to24 = resting_pins17to24
+
+        self._setRestingAndThresholdByte(resting_pins1to8, resting_pins17to24, self.threshold)
+
+    def send_ttl(self, event_code=1):
+        if self.ver < 5:
+            raise NotImplementedError('Older RTBox not supported currently')
+        maxTTL = 255
+        if not isinstance(event_code, int) or event_code < 0:
+            raise Exception('event_code must be an integer that is >= 1')
+        if event_code > maxTTL:
+            raise Exception('event_code must be greater than 255')
+
+        bytes_to_write = pack_bytes([1, event_code])
+        t_pre = core.getTime()
+        self.ser.write(bytes_to_write)
+        t_post = core.getTime()
+        t_win = t_post - t_pre
+
+        byte = self.ser.read()
+        print "Response: " + byte
+
+        if (t_win > 0.003):
+            warnings.warn('USB Overload, t_win = ' + str(t_win))
+
+        return (t_pre, t_win)
+
+    def ttl_width(self, in2=0.00097):
+        if self.ver < 4.4:
+            raise NotImplementedError('Older RTBox not supported currently')
+
+        # width_unit is 0.139e-3, not very accurate
+        width_unit = 1/7200
+
+        if (in2 < width_unit * 0.9 or in2 > width_unit * 255 * 1.1) and in2 > 0:
+            warnings.warn('Invalid TTL width')
+
+        # real width
+        width = math.floor(in2 / width_unit) * width_unit
+
+        self._writeEEPROM(224, pack_bytes([255 - width / width_unit]))
+
+        if abs(width - in2) / in2 > 0.1:
+            warnings.warn('TTL width will be about ' + width + ' seconds')
+
+        self.TTLWidth = width
+
+        self._purge()
+
+        return width
+
 
     def _enable_disable_events(self, event_types, enable_disable):
         # Check for valid input
@@ -421,12 +509,17 @@ class RTBox(object):
         self.ser.write(data_string)
 
     def _purgeBuffers(self):
-        if (self.ser.VERSION >= 3):
+        if serial.VERSION >= 3:
             self.ser.reset_input_buffer()
             self.ser.reset_output_buffer()
         else:
             self.ser.flushInput()
             self.ser.flushOutput()
+
+
+
+
+
 
 # From: http://stackoverflow.com/questions/2591483/getting-a-specific-bit-value-in-a-byte-string
 def get_bits(byteval, locs):
