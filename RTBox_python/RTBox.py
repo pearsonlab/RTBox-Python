@@ -129,7 +129,7 @@ class RTBox(object):
 
         :return: nothing
         """
-        self.ser.close
+        self.ser.close()
 
     def get_clock_ratio(self):
         """
