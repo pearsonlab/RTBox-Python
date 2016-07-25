@@ -175,15 +175,13 @@ class RTBox(object):
         event_times returns a list of times the events were recorded relative to the psychopy core module.  Element in
         index i for events and event_times refer to the same event.
         """
-
+        self._purge()
         # Wait for time
         curr_time = core.getTime()
         timeout = curr_time + secs
 
         is_reading = False
         num_bytes_prev = self.ser.inWaiting()
-        curr_time = core.getTime()
-        print 'Current time: ' + str(curr_time)
         while curr_time < timeout or is_reading:
             time.sleep(self.latency_timer/1000)
             curr_time = core.getTime()
@@ -203,6 +201,44 @@ class RTBox(object):
             events.append(RTBox.EVENT_CODES[unpack_bytes(events_bytes[i*7])[0]])
             event_times.append(self._bytes2secs(unpack_bytes(events_bytes[i*7 + 1: (i+1)*7])) + self.t_diff)
         return [events, event_times]
+
+    def wait_press(self, secs=0.1):
+        """
+        Wait for input up to the time specified in secs.
+
+        :param secs: length of max time to read in seconds
+
+        :return: Returns a tuple (event, event_time).  'event' is the string label of the event detected.
+        'event_time' is the timestamp relative to the psychopy core module.
+        """
+        self._purge()
+        # Wait for time
+        curr_time = core.getTime()
+        timeout = curr_time + secs
+
+        is_reading = False
+        num_bytes_prev = self.ser.inWaiting()
+        while curr_time < timeout or is_reading:
+            time.sleep(self.latency_timer/1000)
+            curr_time = core.getTime()
+            num_bytes_curr = self.ser.inWaiting()
+            # Wait if reading
+            if num_bytes_curr > num_bytes_prev:
+                is_reading = True
+            else:
+                if is_reading:  # if finished reading one event
+                    break
+                is_reading = False
+            num_bytes_prev = num_bytes_curr
+        # Each event contains 7 bytes
+        events_bytes = self.ser.read(7)
+        if len(events_bytes) > 0:
+            event = RTBox.EVENT_CODES[unpack_bytes(events_bytes[0])[0]]
+            event_time = self._bytes2secs(unpack_bytes(events_bytes[1:7])) + self.t_diff
+        else:
+            event = None
+            event_time = core.getTime()
+        return (event, event_time)
 
     def set_clock(self, samples_per_trial=10, trials_per_iteration=20, iterations=3, interval=1):
         """
@@ -421,7 +457,7 @@ class RTBox(object):
         self.ser.write(data_string)
 
     def _purgeBuffers(self):
-        if (self.ser.VERSION >= 3):
+        if (float(serial.VERSION) >= 3):
             self.ser.reset_input_buffer()
             self.ser.reset_output_buffer()
         else:
