@@ -77,7 +77,7 @@ class RTBox(object):
             'aux': False
         }
         self.tpreOffset = [9.2306e-5, 9.2306e-5]
-        self.latency_timer = 1
+        self.latency_timer = 1.0
         self.num_events_to_read = 1
 
         if self.ver >= 5.0:
@@ -230,8 +230,9 @@ class RTBox(object):
                     break
                 is_reading = False
             num_bytes_prev = num_bytes_curr
+        num_events = num_bytes_curr / 7
         # Each event contains 7 bytes
-        events_bytes = self.ser.read(7)
+        events_bytes = self.ser.read(num_events * 7)
         if len(events_bytes) > 0:
             event = RTBox.EVENT_CODES[unpack_bytes(events_bytes[0])[0]]
             event_time = self._bytes2secs(unpack_bytes(events_bytes[1:7])) + self.t_diff
@@ -433,7 +434,7 @@ class RTBox(object):
         tout = core.getTime() + 1
         # check to make sure RTBox is idle
         while True:
-            time.sleep(0.001)
+            time.sleep(0.0001)
             byte1 = self.ser.inWaiting()
             if byte1 == byte:
                 break
